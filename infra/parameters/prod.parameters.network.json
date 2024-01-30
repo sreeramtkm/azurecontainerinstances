@@ -1,0 +1,19 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+      "location": {
+        "value": "{replacewithlocation}"
+      },
+      "vnetIPPrefix": {
+        "value": "172.29.132.0/23"
+      },
+      "containerInstancesSubnetIPPrefix": {
+        "value": "172.29.132.0/26"
+      },
+      "applicationGatewaySubnetIPPrefix": {
+        "value": "172.29.132.64/26"
+      }
+    }
+  }
+  

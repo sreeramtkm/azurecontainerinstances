@@ -1,0 +1,345 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run test, deploys, and mosre:
+# https://aka.ms/yaml
+
+trigger:
+  branches:
+    include:
+      - main
+      - dev*
+      - test*
+  paths:
+    include:
+    - infra
+    - app
+    exclude:
+    - infra/README.md
+    - README.md
+
+parameters:
+- name: initialDeployment
+  displayName: DeployAllStages
+  type: boolean
+  default: false
+
+
+variables:
+- name: environment
+  ${{ if eq(variables['Build.SourceBranch'], 'refs/heads/main') }}:
+    value: "prod"
+  ${{ else }}:
+    value: "test"
+- name: ouath2proxyimageversion
+  value: v7.4.0
+- name: project
+  value: "{give a string value here}"
+- name: resourceGroupDeploymentNamenetwork
+  value: 'deployment-${{ variables.project}}-rg-network'
+- name: resourceGroupDeploymentNameStateful
+  value: 'deployment-${{ variables.project}}-rg-stateful'
+- name: resourceGroupDeploymentNameStateless
+  value: 'deployment-${{ variables.project}}-rg-stateless'
+# There is a need for separate resource group for acr as the image needs to be pushed before 
+# container instance infrastructure is there .   
+- name: acrResourceDeploymentName
+  value: 'deployment-acr-resource'
+- name: resourcesDeploymentNameForStateless
+  value: 'deployment-resource-stateless'
+- name: resourcesDeploymentNameForStateful
+  value: 'deployment-resource-stateful'
+- name: resourcesDeploymentNameForNetwork
+  value: 'deployment-resource-network'
+- name: resourcesDeploymentNameForfunctionapp
+  value: 'deployment-resource-functionapp'
+- name: resourcesDeploymentNameForContainergroups
+  value: 'deployment-resource-containergroups'
+- name: resourcesDeploymentNameforappgw
+  value: 'deployment-resource-appgw'
+- name: location
+  value: 'norwayeast'
+- name: resourceGroupNameForStatefulSvc
+  value: 'rg-${{ variables.project}}-${{ variables.environment}}-stateful'
+- name: resourceGroupNameForStatelessSvc
+  value: 'rg-${{ variables.project}}-${{ variables.environment}}-stateless'
+- name: resourceGroupNameForNetwork
+  value: 'rg-${{ variables.project}}-${{ variables.environment}}-network'
+- name: acmefunctionappname
+  value: 'acmefunctionapp${{variables.project}}${{variables.environment}}'
+- name: resourcesDeploymentNamefordns
+  value: 'deployment-resource-dns'
+- name: registry
+  value: '${{ variables.environment}}${{ variables.project}}'
+
+
+
+pool:
+  vmImage: 'ubuntu-latest'
+  location: ${variables.location}
+
+
+stages:
+- ${{ if eq(parameters.initialDeployment, true) }}:  
+  - stage: CreateResourceGroupForNetworkinfra
+    jobs:
+  # The CreateResourceGroupForNetwork job creates a resource group for hosting network . 
+    - job: CreateResourceGroupForNetwork
+      steps:
+        - task: AzureCLI@2
+          displayName: Deploy task for ResourceGroup
+          inputs:
+            azureSubscription: '${{ variables.environment}}_soilt_owner_perms'
+            scriptType: bash 
+            scriptLocation: inlineScript
+            useGlobalConfig: false
+            inlineScript: | 
+              cd soilit/infra
+              az deployment sub create --name ${{ variables.resourceGroupDeploymentNamenetwork }} --location ${{ variables.location}} \
+              --template-file resource-group.bicep --parameters resourceGroupName=${{ variables.resourceGroupNameForNetwork}} \
+              --parameters ./parameters/${{ variables.environment}}.parameters.resource-group.json 
+
+# The stage creates resourcegroupseach for storing stateful services and stateful service . 
+- ${{ if eq(parameters.initialDeployment, true) }}:  
+  - stage: CreateResourceGroupandContainerRegistry
+    jobs:
+  # The CreateResourceGroupForStatefulSvc job has two tasks and cannot be two jobs as it cannot be run parallely . The deployment of container
+  # registry is dependant on the resource group creation .
+    - job: CreateResourceGroupForStatefulSvc
+      steps:
+        - task: AzureCLI@2
+          displayName: Deploy task for ResourceGroup
+          inputs:
+            azureSubscription: '${{ variables.environment}}_soilt_owner_perms'
+            scriptType: bash 
+            scriptLocation: inlineScript
+            useGlobalConfig: false
+            inlineScript: | 
+              cd soilit/infra
+              az deployment sub create --name ${{ variables.resourceGroupDeploymentNameStateful }} --location ${{ variables.location}} \
+              --template-file resource-group.bicep --parameters resourceGroupName=${{ variables.resourceGroupNameForStatefulSvc}} \
+              --parameters ./parameters/${{ variables.environment}}.parameters.resource-group.json
+
+
+# Creation of container registry 
+        - task: AzureCLI@2
+          displayName: Deploy task for Container Registry
+          inputs:
+            azureSubscription: '${{ variables.environment}}_soilt_contributor_perms'
+            scriptType: bash 
+            scriptLocation: inlineScript
+            useGlobalConfig: false
+            inlineScript: | 
+              cd soilit/infra
+              az stack group create --deny-settings-mode 'none' --name ${{ variables.acrResourceDeploymentName}} \
+              --resource-group ${{ variables.resourceGroupNameForStatefulSvc }} --template-file containerregistry.bicep \
+              --parameters ./parameters/${{ variables.environment}}.parameters.statefulresources.json \
+               --parameters registry_name=${{variables.registry}} --delete-resources --yes
+
+# The creation of stateless resource group is set as a separate job to make it run parallely
+    - job: CreateResourceGroupForStatelessSvc
+      steps:
+        - task: AzureCLI@2
+          displayName: Deploy task for ResourceGroup
+          inputs:
+            azureSubscription: '${{ variables.environment}}_soilt_owner_perms'
+            scriptType: bash 
+            scriptLocation: inlineScript
+            useGlobalConfig: false
+            inlineScript: | 
+              cd soilit/infra
+              az deployment sub create --name ${{ variables.resourceGroupDeploymentNameStateless }} --location ${{ variables.location}} \
+              --template-file resource-group.bicep --parameters resourceGroupName=${{ variables.resourceGroupNameForStatelessSvc}} \
+              --parameters ./parameters/${{ variables.environment}}.parameters.resource-group.json
+
+- ${{ if eq(parameters.initialDeployment, true) }}:  
+  - stage: Createfunctionapp
+    jobs:
+  # The function app will be a kron job and deploy a new certificate from Lets encrypt every 30 days.  A sleep of 5m is added
+  # to the "CreateInfrastructureForFunctionApp" for fi 
+    - job: CreateInfrastructureForFunctionApp
+      steps:
+        - task: AzureCLI@2
+          displayName: Deploy infrastructure for function app
+          inputs:
+            azureSubscription: '${{ variables.environment}}_soilt_contributor_perms'
+            scriptType: bash 
+            scriptLocation: inlineScript
+            useGlobalConfig: false
+            inlineScript: | 
+              cd soilit/infra
+              cp ./scripts/certificate-functionapp.sh ./parameters/certificate-functionapp.sh
+              cd parameters && bash certificate-functionapp.sh -a ${{ variables.environment}} -b ${{ variables.project}} \
+               -c ${{ variables.resourceGroupNameForStatefulSvc }} -d ${{ variables.acrResourceDeploymentName}}
+              cd ..
+              az stack group create --deny-settings-mode None --name ${{ variables.resourcesDeploymentNameForfunctionapp}} \
+              --resource-group ${{ variables.resourceGroupNameForStatelessSvc}} --template-file certificate-functionapp.bicep \
+              --parameters ./parameters/${{ variables.environment}}.parameters.certificate-functionapp.json --delete-resources --yes
+              if [ ${{ parameters.initialDeployment }} ]; then
+                echo "initalDeployment is true. Hence running a sleep to delay the next task"
+                sleep 5m
+              fi
+        
+        - task: AzureCLI@2
+          displayName: Deploy the app on functionapp infra
+          inputs:
+            azureSubscription: '${{ variables.environment}}_soilt_contributor_perms'
+            scriptType: bash 
+            scriptLocation: inlineScript
+            useGlobalConfig: false
+            inlineScript: | 
+              cd soilit/cronjobs
+              curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg
+              sudo mv microsoft.gpg /etc/apt/trusted.gpg.d/microsoft.gpg
+              sudo sh -c 'echo "deb [arch=amd64] https://packages.microsoft.com/repos/microsoft-ubuntu-$(lsb_release -cs)-prod $(lsb_release -cs) main" > /etc/apt/sources.list.d/dotnetdev.list'
+              sudo apt-get update
+              sudo apt-get install azure-functions-core-tools-4
+              func azure functionapp publish ${{ variables.acmefunctionappname }}
+
+
+# Docker build the app and push to ACR stage . In future it would not be a good idea to set triggers for this 
+- stage: BuildDockerImageandPushToACR
+  jobs:
+  - job: BuildDockerImage
+    steps:
+      - task: Docker@1
+        displayName: Build docker image
+        inputs:
+          containerregistrytype: 'Azure Container Registry'
+          azureContainerRegistry: ${{ variables.registry}}.azurecr.io
+          azureSubscriptionEndpoint: ${{ variables.environment}}_soilt_contributor_perms
+          command: 'Build an image'
+          dockerFile: soilit/app/soilt/Dockerfile
+
+      - task: Docker@1
+        displayName: Push image to registry
+        inputs:
+          containerregistrytype: 'Azure Container Registry'
+          azureContainerRegistry: ${{ variables.registry}}.azurecr.io
+          azureSubscriptionEndpoint: ${{ variables.environment}}_soilt_contributor_perms
+          command: 'Push an image'
+
+- ${{ if eq(parameters.initialDeployment, true) }}:
+  - stage: DownloadOauthProxyImage
+    jobs:
+    - job: BuildDockerImage
+      steps:
+      - task: AzureCLI@2
+        displayName: Download OauthProxyImage
+        inputs:
+          azureSubscription: '${{ variables.environment}}_soilt_contributor_perms'
+          scriptType: bash 
+          scriptLocation: inlineScript
+          useGlobalConfig: false
+          inlineScript: | 
+            docker pull quay.io/oauth2-proxy/oauth2-proxy:${{ variables.ouath2proxyimageversion}}
+            docker tag  quay.io/oauth2-proxy/oauth2-proxy:${{ variables.ouath2proxyimageversion}} ${{ variables.registry}}.azurecr.io/oauth2-proxy:${{ variables.ouath2proxyimageversion}}
+      - task: Docker@1
+        displayName: Push image to registry
+        inputs:
+          containerregistrytype: 'Azure Container Registry'
+          azureContainerRegistry: ${{ variables.registry}}.azurecr.io
+          azureSubscriptionEndpoint: ${{ variables.environment}}_soilt_contributor_perms
+          command: 'Push an image'
+          imageName: ${{ variables.registry}}.azurecr.io/oauth2-proxy:${{ variables.ouath2proxyimageversion}}
+
+# Build the base infrastructure which includes network , subnet and nsg. The decomposition is required for
+# faster pipeline runs
+- stage: CreateUpdateNetworking
+  jobs:
+  - job: CreateNetworking
+    steps:
+    - task: AzureCLI@2
+      displayName: Deploy Networking /Update Networking
+      inputs:
+        azureSubscription: '${{ variables.environment}}_soilt_contributor_perms'
+        scriptType: bash 
+        scriptLocation: inlineScript
+        useGlobalConfig: false
+        inlineScript: | 
+          cd soilit/infra
+          az stack group create --deny-settings-mode None --name ${{ variables.resourcesDeploymentNameForNetwork}} \
+          --resource-group ${{ variables.resourceGroupNameForNetwork}} --template-file network.bicep \
+           --parameters ./parameters/${{ variables.environment}}.parameters.network.json --delete-resources --yes
+
+
+- stage: CreateUpdateContainergroups
+  jobs:
+  - job: CreateUpdateContainerGroups
+    steps:
+    - task: AzureCLI@2
+      displayName: Deploy containergroups /Update containergroups
+      inputs:
+        azureSubscription: '${{ variables.environment}}_soilt_contributor_perms'
+        scriptType: bash 
+        scriptLocation: inlineScript
+        useGlobalConfig: false
+        inlineScript: | 
+          cd soilit/infra
+          cp scripts/container-groups.sh ./parameters/container-groups.sh
+          cd parameters
+          echo $(Build.Repository.Name)
+          repo_name=$(echo $(Build.Repository.Name) | awk '{print tolower($0)}')
+          echo $repo_name
+          bash container-groups.sh -a ${{ variables.registry}} -b $repo_name -c ${{ variables.acrResourceDeploymentName}} \
+            -d ${{ variables.resourceGroupNameForStatefulSvc }} -e ${{ variables.resourcesDeploymentNameForNetwork}} \
+            -f ${{ variables.resourceGroupNameForNetwork}} -g ${{ variables.environment}}
+          cd ..
+          az stack group create --deny-settings-mode None --name ${{ variables.resourcesDeploymentNameForContainergroups}} \
+            --resource-group ${{ variables.resourceGroupNameForStatelessSvc}} --template-file container-groups.bicep \
+            --parameters ./parameters/${{ variables.environment}}.parameters.container-groups.json --delete-resources --yes
+
+
+
+- stage: CreateUpdateAppgw
+  jobs:
+  - job: CreateUpdateAppgw
+    steps:
+    - task: AzureCLI@2
+      displayName: Deploy Application Gateway /Update Application Gateway
+      inputs:
+        azureSubscription: '${{ variables.environment}}_soilt_contributor_perms'
+        scriptType: bash 
+        scriptLocation: inlineScript
+        useGlobalConfig: false
+        inlineScript: | 
+          cd soilit/infra
+          cp scripts/app-gw.sh ./parameters/app-gw.sh
+          bash app-gw.sh -a ${{ variables.registry}}  -b ${{ variables.acrResourceDeploymentName}} \
+            -c ${{ variables.resourceGroupNameForStatefulSvc }} -d ${{ variables.resourcesDeploymentNameForNetwork}} \
+            -e ${{ variables.resourceGroupNameForNetwork}} -f ${{ variables.resourcesDeploymentNameForContainergroups}} \
+            -g ${{ variables.resourceGroupNameForStatelessSvc}} -h ${{ variables.environment}}
+          cd ..
+          az stack group create --deny-settings-mode None --name ${{ variables.resourcesDeploymentNameforappgw}} \
+            --resource-group ${{ variables.resourceGroupNameForStatelessSvc}} --template-file application-gateway.bicep \
+            --parameters ./parameters/${{ variables.environment}}.parameters.app-gw.json --delete-resources --yes
+
+
+- stage: CreateUpdatednsrecords
+  jobs:
+  - job: CreateUpdatednsrecords
+    steps:
+    - task: AzureCLI@2
+      displayName: Deploy dnsrecords /Update dnsrecords
+      inputs:
+        azureSubscription: '${{ variables.environment}}_soilt_contributor_perms'
+        scriptType: bash 
+        scriptLocation: inlineScript
+        useGlobalConfig: false
+        inlineScript: | 
+          cd soilit/infra
+          cp scripts/dnsrecord.sh ./parameters/dnsrecord.sh
+          cd parameters
+          bash dnsrecord.sh -a ${{ variables.resourcesDeploymentNameforappgw}} -b ${{ variables.acrResourceDeploymentName}} \
+            -c ${{ variables.resourceGroupNameForStatefulSvc }} -d ${{ variables.resourceGroupNameForStatelessSvc}} \
+            -e ${{ variables.environment}}
+          cd ..
+          az stack group create --deny-settings-mode None --name ${{ variables.resourcesDeploymentNamefordns}} \
+            --resource-group ${{ variables.resourceGroupNameForStatefulSvc }} --template-file dnsrecord.bicep \
+            --parameters ./parameters/${{ variables.environment}}.parameters.dnsrecord.json --delete-resources --yes
+          
+            
+          
+  
+
+
+

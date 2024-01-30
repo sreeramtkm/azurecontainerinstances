@@ -1,0 +1,12 @@
+{
+    "accountkeyfile": "/tmp/account.key",
+    "csrfile": "/tmp/domain.csr",
+    "dnszone": "test.soilit.getek.io",
+    "dnsservername": "8.8.8.8",
+    "ttl": 10,
+    "azuresubscriptionid": "66c65417-bd76-4a1a-b89c-deefedccc0cb",
+    "resourcegroupname": "rg-soilit-test-stateful",
+    "keyvaulturl": "https://kv-soilit-test-v1.vault.azure.net/",
+    "acmedirectory": "https://acme-v02.api.letsencrypt.org/directory",
+    "certcname": "app.test.soilit.getek.io"
+}

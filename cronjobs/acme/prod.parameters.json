@@ -1,0 +1,12 @@
+{
+    "accountkeyfile": "templocationinfunctionappforstoringkeyfile",
+    "csrfile": "templocationinfunctionappforcsr",
+    "dnszone": "replacewithdnszonename",
+    "dnsservername": "8.8.8.8",
+    "ttl": 10,
+    "azuresubscriptionid": "replacewithazuresubscriptionid",
+    "resourcegroupname": "replacewithresourcegroupnamewherethekeyvaultexists",
+    "keyvaulturl": "replacewithkeyvaulturl",
+    "acmedirectory": "https://acme-v02.api.letsencrypt.org/directory",
+    "certcname": "replacewithdomainname"
+}

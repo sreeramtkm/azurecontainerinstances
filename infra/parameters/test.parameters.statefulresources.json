@@ -1,0 +1,31 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+      "location": {
+        "value": "{replacewithlocation}"
+      },
+      "environmentsuffix": {
+        "value": "test"
+      },
+      "projectname": {
+        "value": "{replacewithauniqueprojectname}"
+      },
+      "tenantid": {
+        "value": "{replacewithazuretenantid}"
+      },
+      "svcprincipleforpipeline": {
+        "value": "{replacewiththeapplicationobjectid}"
+      },
+      "svcprincipleforplatformteam": {
+        "value": "replacewiththegroupobjectid"
+      },
+      "rootzonename": {
+        "value": "{replacewithrootzonename}"
+      },
+      "managedIdentityNamePrefix": {
+        "value": "{replacewithmanagedidentityname}"
+      }
+    }
+  }
+  

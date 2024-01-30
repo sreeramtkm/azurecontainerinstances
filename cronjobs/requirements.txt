@@ -1,0 +1,18 @@
+# Do not include azure-functions-worker in this file
+# The Python Worker is managed by the Azure Functions platform
+# Manually managing azure-functions-worker may cause unexpected issues
+
+azure-functions==1.14.0
+azure-identity==1.14.0
+opencensus-ext-azure==1.1.9
+smtp2go==2.3.1
+azure-keyvault-secrets==4.7.0
+requests==2.31.0
+python-dateutil==2.8.2
+azure-mgmt-dns==8.1.0
+azure-core==1.29.4
+azure-keyvault-keys==4.8.0
+pyopenssl ==23.2.0
+dnspython==2.4.2
+josepy==1.13.0
+pycryptodome==3.19.0
